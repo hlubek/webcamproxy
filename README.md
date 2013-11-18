@@ -16,3 +16,5 @@ Get the webcamproxy package and install it:
 Start the proxy by pointing it to the IP address of the webcam stream:
 
     webcamproxy -webcam="192.168.1.2"
+
+Access the webcam interface on http://localhost:8080/ to see the output of the webcam.
