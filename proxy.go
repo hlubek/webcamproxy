@@ -10,7 +10,6 @@ import (
 
 	"go/build"
 	"os"
-	"runtime"
 
 	"code.google.com/p/go.net/websocket"
 )
@@ -105,21 +104,16 @@ func FrameServer(conn *websocket.Conn) {
 	clients[id] = queue
 
 	defer func() {
-		log.Print("Removing client")
 		delete(clients, id)
 	}()
 
 	if _, err := conn.Write(*headerMessage); err != nil {
-		log.Printf("Error writing to client: %v", err)
 		return
 	}
 
 	// Read messages from the queue and write to the client
 	for msg := range queue {
-		if n, err := conn.Write(msg); err == nil {
-			log.Printf("Wrote %d bytes to client", n)
-		} else {
-			log.Printf("Error writing to client: %v", err)
+		if _, err := conn.Write(msg); err != nil {
 			return
 		}
 	}
@@ -128,13 +122,11 @@ func FrameServer(conn *websocket.Conn) {
 func readMessages() {
 	for {
 		if msg, err := src.ReadMessage(); err != nil {
-			log.Fatal(err)
+			log.Printf("Error reading message from source: %v", err)
 		} else {
 			if headerMessage == nil {
 				headerMessage = &msg
 			}
-
-			fmt.Printf("Received %d bytes\n", len(msg))
 
 			for _, queue := range clients {
 				select {
@@ -145,15 +137,6 @@ func readMessages() {
 				}
 			}
 		}
-	}
-}
-
-func printMemoryStats(interval time.Duration) {
-	m := new(runtime.MemStats)
-	for {
-		time.Sleep(interval * time.Second)
-		runtime.ReadMemStats(m)
-		log.Printf("Alloc %d, Total %d, #Mallocs %d", m.Alloc, m.TotalAlloc, m.Mallocs)
 	}
 }
 
@@ -187,7 +170,6 @@ func main() {
 	clients = make(map[int]chan Message)
 
 	go readMessages()
-	go printMemoryStats(10)
 
 	http.Handle("/ws", websocket.Handler(FrameServer))
 	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
