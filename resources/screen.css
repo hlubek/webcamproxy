@@ -1,0 +1,150 @@
+html,body {
+	background-color: #222;
+	color: #fff;
+	font-family: sans-serif;
+	margin: 0;
+	padding: 0;
+	font-size: 12pt;
+}
+
+a {
+	color: #FF8534;
+	text-decoration: none;
+}
+
+a:hover {
+	color: #fff;
+}
+
+div#videoContainer {
+	overflow: hidden;
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	text-align: center;
+}
+canvas#videoCanvas  {
+	background-color: #000;
+	display: block;
+	position: absolute;
+	cursor: move;
+}
+canvas#videoCanvas.full {
+	min-height: 100%;
+	min-width: 100%;
+}
+canvas#videoCanvas.unscaled {
+	max-height: 100%;
+	max-width: 100%;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	margin: auto;
+}
+
+div#videoOverlay {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	top: 0;
+	left: 0;
+}
+
+
+div#copy {
+	text-shadow: 0px 0px 2px #000;
+	font-size: 10px;
+	position: absolute;
+	bottom: 16px;
+	right: 14px
+}
+
+div#copy img {
+	width: 20px;
+	height: 20px;
+	border: 0;
+}
+
+div#notice {
+	width: 100%;
+	position: absolute;
+	top: 40%;
+	left: 0;
+	text-align: center;
+	font-size: 18px;
+}
+
+
+/* Recording
+-------------------------------------------------*/
+div#recordBox {
+	font-size: 12px;
+	position: absolute;
+	left: 12px;
+	bottom: 8px;
+}
+
+span#record {
+	cursor: pointer;
+}
+
+span#recordDot {
+	font-size: 32px;
+}
+span#recordNotice {
+	text-transform: uppercase;
+	vertical-align: bottom;
+	line-height: 32px;
+}
+span#recordStats {
+	display: none;
+	margin-left: 0.5em;
+	font-size: 10px;
+	vertical-align: bottom;
+	line-height: 32px;
+}
+
+span#recordLinkBox {
+	color: #fff;
+	display: none;
+	font-size: 12px;
+	vertical-align: bottom;
+	line-height: 32px;
+}
+
+a#recordLink {
+	vertical-align: bottom;
+	line-height: 32px;
+}
+
+span#recordDisabled {
+	display: none;
+	vertical-align: bottom;
+	line-height: 32px;
+	color: #FF8534; 
+}
+
+span#record.waiting { color: rgba(128, 128, 128, 0.3); }
+span#record.recording  { color: #ff3e2b; }
+span#record.available { color: rgba(255, 255, 255, 0.5); }
+span#record.unavailable { display: none; }
+span#record:hover, span#record.recording:hover, span#record.available:hover { color: #fff; }
+
+
+/* Spinner Animation
+-------------------------------------------------*/
+@-webkit-keyframes spin { from { -webkit-transform: rotate(0deg); } to { -webkit-transform: rotate(360deg); } }
+@-moz-keyframes spin { from { -moz-transform: rotate(0deg); } to { -moz-transform: rotate(360deg); } }
+@keyframes spin { from { tra	nsform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spinner .maskedCircle { width: 10px; height: 10px; border-radius: 9px; border: 2px solid white; }
+.spinner .mask { width:8px; height: 8px; overflow: hidden; }
+.spinner {
+	display: inline-block;
+	margin: 0 8px -2px 8px;
+	width: 18px; height: 18px;
+	-webkit-animation: spin 1s infinite linear;
+	-moz-animation: spin 1s infinite linear;
+	animation: spin 1s infinite linear;
+}
+

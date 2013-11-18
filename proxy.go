@@ -1,65 +1,195 @@
 package main
 
 import (
-	"net"
+	"fmt"
+	"log"
 	"net/http"
 
-	"io"
-	"log"
+	"flag"
+	"time"
+
+	"go/build"
+	"os"
+	"runtime"
+
+	"code.google.com/p/go.net/websocket"
 )
 
-func websocketProxy(target string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		d, err := net.Dial("tcp", target)
-		if err != nil {
-			http.Error(w, "Error contacting backend server.", 500)
-			log.Printf("Error dialing websocket backend %s: %v", target, err)
-			return
-		}
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			http.Error(w, "Not a hijacker?", 500)
-			return
-		}
-		nc, _, err := hj.Hijack()
-		if err != nil {
-			log.Printf("Hijack error: %v", err)
-			return
-		}
-		defer nc.Close()
-		defer d.Close()
+const basePkg = "github.com/chlu/webcamproxy"
 
-		// Write headers by hand, because libwebsocket on the iPhone wants it that way ;)
-		s := "GET /ws HTTP/1.1\r\n" +
-			"Upgrade: websocket\r\n" +
-			"Connection: Upgrade\r\n" +
-			"Host: 192.168.10.231\r\n" +
-			"Origin: http://192.168.10.231\r\n" +
-			"Pragma: no-cache\r\n" +
-			"Cache-Control: no-cache\r\n" +
-			"Sec-WebSocket-Key: " + r.Header.Get("Sec-WebSocket-Key") + "\r\n" +
-			"Sec-WebSocket-Version: " + r.Header.Get("Sec-WebSocket-Version") + "\r\n" +
-			"Sec-WebSocket-Extensions: " + r.Header.Get("Sec-WebSocket-Extensions") + "\r\n\r\n"
+// --------------------------
 
-		_, err = io.WriteString(d, s)
-		if err != nil {
-			log.Printf("Error copying request to target: %v", err)
+type Message []byte
+
+type MessageSource interface {
+	Initialize() error
+	ReadMessage() (Message, error)
+}
+
+// --------------------------
+
+const MaxInstacamFrameLength = 20000
+const MessageBufferSize = 1024
+
+type InstacamMessageSource struct {
+	// "ws://1.2.3.4:80/ws"
+	Url     string
+	camConn *websocket.Conn
+}
+
+func (s *InstacamMessageSource) Initialize() error {
+	if ws, err := websocket.Dial(s.Url, "", "http://localhost/"); err != nil {
+		return fmt.Errorf("Error initializing Instacam stream: %v", err)
+	} else {
+		s.camConn = ws
+		return nil
+	}
+}
+
+func (s *InstacamMessageSource) ReadMessage() (Message, error) {
+	msg := make([]byte, MaxInstacamFrameLength)
+	if n, err := s.camConn.Read(msg); err != nil {
+		return nil, err
+	} else {
+		if n == MaxInstacamFrameLength {
+			return nil, fmt.Errorf("Frame size exceeded buffer (%d bytes)", MaxInstacamFrameLength)
+		} else {
+			return Message(msg[:n]), nil
+		}
+	}
+}
+
+// --------------------------
+
+type RandomMessageSource struct {
+}
+
+func (s *RandomMessageSource) Initialize() error {
+	return nil
+}
+
+func (s *RandomMessageSource) ReadMessage() (Message, error) {
+	msg := make([]byte, MaxInstacamFrameLength)
+	// TODO add some randomness
+
+	time.Sleep(100 * time.Millisecond)
+	return msg, nil
+}
+
+// --------------------------
+
+var webcamAddress = flag.String("webcam", "", "IP address of the webcam")
+var mock = flag.Bool("mock", false, "Mock the webcam source for testing")
+
+var headerMessage *Message
+var clients map[int]chan Message
+var idSequence int = 0
+
+var src MessageSource
+
+// Write received messages from a channel to the websocket client
+func FrameServer(conn *websocket.Conn) {
+	// Set the PayloadType to binary
+	conn.PayloadType = websocket.BinaryFrame
+
+	// TODO Send first message as header to every new client
+	// struct { char magic[4] = "jsmp"; unsigned short width, height; };
+
+	queue := make(chan Message, MessageBufferSize)
+
+	// Assign a unique id to the client
+	idSequence++
+	id := idSequence
+
+	// TODO Guard this!
+	clients[id] = queue
+
+	defer func() {
+		log.Print("Removing client")
+		delete(clients, id)
+	}()
+
+	if _, err := conn.Write(*headerMessage); err != nil {
+		log.Printf("Error writing to client: %v", err)
+		return
+	}
+
+	// Read messages from the queue and write to the client
+	for msg := range queue {
+		if n, err := conn.Write(msg); err == nil {
+			log.Printf("Wrote %d bytes to client", n)
+		} else {
+			log.Printf("Error writing to client: %v", err)
 			return
 		}
+	}
+}
 
-		errc := make(chan error, 2)
-		cp := func(dst io.Writer, src io.Reader) {
-			_, err := io.Copy(dst, src)
-			errc <- err
+func readMessages() {
+	for {
+		if msg, err := src.ReadMessage(); err != nil {
+			log.Fatal(err)
+		} else {
+			if headerMessage == nil {
+				headerMessage = &msg
+			}
+
+			fmt.Printf("Received %d bytes\n", len(msg))
+
+			for _, queue := range clients {
+				select {
+				case queue <- msg:
+					// No op
+				default:
+					log.Printf("Not send to client, blocked or closed?")
+				}
+			}
 		}
-		go cp(d, nc)
-		go cp(nc, d)
-		<-errc
-	})
+	}
+}
+
+func printMemoryStats(interval time.Duration) {
+	m := new(runtime.MemStats)
+	for {
+		time.Sleep(interval * time.Second)
+		runtime.ReadMemStats(m)
+		log.Printf("Alloc %d, Total %d, #Mallocs %d", m.Alloc, m.TotalAlloc, m.Mallocs)
+	}
+}
+
+func getResourceRoot() string {
+	p, err := build.Default.Import(basePkg, "", build.FindOnly)
+	if err != nil {
+		log.Fatalf("Couldn't find resource files: %v", err)
+	}
+	return p.Dir
 }
 
 func main() {
-	http.Handle("/ws", websocketProxy("192.168.10.231:80"))
-	http.Handle("/", http.FileServer(http.Dir("./resources")))
+	flag.Parse()
+
+	if *webcamAddress == "" {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	if *mock {
+		src = &RandomMessageSource{}
+	} else {
+		src = &InstacamMessageSource{Url: "ws://" + *webcamAddress + ":80/ws"}
+	}
+
+	err := src.Initialize()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	clients = make(map[int]chan Message)
+
+	go readMessages()
+	go printMemoryStats(10)
+
+	http.Handle("/ws", websocket.Handler(FrameServer))
+	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
 	http.ListenAndServe(":8080", nil)
 }

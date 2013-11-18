@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta name="viewport" content="width=320, initial-scale=1"/>
+	<title>Instant Webcam</title>
+	<link rel="stylesheet" type="text/css" href="screen.css"/>
+	<link rel="Shortcut Icon" href="InstantWebcam.png" />
+	<style type="text/css">
+		
+	</style>
+</head>
+<body>
+	<div id="videoContainer">
+		
+		<canvas id="videoCanvas" class="full" width="640" height="480">
+			<p>
+				Please use a browser that supports the Canvas Element, like
+				<a href="http://www.google.com/chrome">Chrome</a>,
+				<a href="http://www.mozilla.com/firefox/">Firefox</a>,
+				<a href="http://www.apple.com/safari/">Safari</a> or Internet Explorer 10
+			</p>
+		</canvas>
+		
+		<div id="notice">
+			<div class="spinner"><div class="mask"><div class="maskedCircle"></div></div></div>
+			<span id="noticeText">Connecting</span>
+		</div>
+		
+		<div id="copy">
+			<a href="http://instant-webcam.com/" title="Instant Webcam">
+				<img alt="Instant Webcam" src="InstantWebcam.png"/>
+			</a>
+		</div>
+		
+		<div id="recordBox">
+			<span id="record" title="Record MPG Video">
+				<span id="recordDot">&#x25cb;</span>
+				<span id="recordNotice">Record</span>
+			</span>
+			<span id="recordDisabled">&#x2014; Please use Firefox or Chrome to record Video. Sorry :/</span>
+			<span id="recordStats">(1.2mb)</span>
+			<span id="recordLinkBox">
+				&#x2014; Download: <a href="#" id="recordLink">Recording.mpg (1.2mb)</a>
+			</span>
+		</div>
+	</div>
+	<script type="text/javascript" src="jsmpg.js"></script>
+	<script type="text/javascript" src="instacam.js"></script>
+</body>
+</html>
