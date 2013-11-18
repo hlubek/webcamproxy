@@ -78,6 +78,7 @@ func (s *RandomMessageSource) ReadMessage() (Message, error) {
 // --------------------------
 
 var webcamAddress = flag.String("webcam", "", "IP address of the webcam")
+var address = flag.String("adress", ":8080", "Address for the proxy to listen")
 var mock = flag.Bool("mock", false, "Mock the webcam source for testing")
 
 var headerMessage *Message
@@ -173,5 +174,5 @@ func main() {
 
 	http.Handle("/ws", websocket.Handler(FrameServer))
 	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(*address, nil)
 }
