@@ -80,7 +80,6 @@ func (s *RandomMessageSource) ReadMessage() (Message, error) {
 
 var webcamAddress = flag.String("webcam", "", "IP address of the webcam")
 var address = flag.String("adress", ":8080", "Address for the proxy to listen")
-var mock = flag.Bool("mock", false, "Mock the webcam source for testing")
 
 var headerMessage *Message
 var clients map[int]chan Message
@@ -158,11 +157,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *mock {
-		src = &RandomMessageSource{}
-	} else {
-		src = &InstacamMessageSource{Url: "ws://" + *webcamAddress + ":80/ws"}
-	}
+	src = &InstacamMessageSource{Url: "ws://" + *webcamAddress + ":80/ws"}
 
 	err := src.Initialize()
 	if err != nil {
