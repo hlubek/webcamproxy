@@ -1,5 +1,4 @@
-[![Build Status](https://travis-ci.org/chlu/webcamproxy.png?branch=master)](https://travis-ci.org/chlu/webcamproxy)
-webcamproxy
+webcamproxy [![Build Status](https://travis-ci.org/chlu/webcamproxy.png?branch=master)](https://travis-ci.org/chlu/webcamproxy)
 ===========
 
 A proxy for Instant Webcam (or any other MPEG stream) that broadcasts the websocket message from one source to multiple clients.
