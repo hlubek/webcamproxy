@@ -41,8 +41,8 @@ func (s *InstacamMessageSource) Initialize() error {
 		return fmt.Errorf("Error initializing Instacam stream: %v", err)
 	} else {
 		s.camConn = ws
-		return nil
 	}
+	return nil
 }
 
 func (s *InstacamMessageSource) ReadMessage() (Message, error) {
@@ -56,6 +56,7 @@ func (s *InstacamMessageSource) ReadMessage() (Message, error) {
 			return Message(msg[:n]), nil
 		}
 	}
+	return nil, nil
 }
 
 // --------------------------
