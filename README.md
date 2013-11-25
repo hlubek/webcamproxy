@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/chlu/webcamproxy.png?branch=master)](https://travis-ci.org/chlu/webcamproxy)
 webcamproxy
 ===========
 
