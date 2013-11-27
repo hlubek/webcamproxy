@@ -10,14 +10,14 @@ import (
 	"go/build"
 	"os"
 
-	"sync"
-
 	"code.google.com/p/go.net/websocket"
 )
 
 const basePkg = "github.com/chlu/webcamproxy"
 
 // --------------------------
+
+const MessageBufferSize = 1024
 
 type Message []byte
 
@@ -26,10 +26,18 @@ type MessageSource interface {
 	ReadMessage() (Message, error)
 }
 
+type Client struct {
+	queue chan *Message
+}
+
+func NewClient() *Client {
+	queue := make(chan *Message, MessageBufferSize)
+	return &Client{queue}
+}
+
 // --------------------------
 
 const MaxInstacamFrameLength = 20000
-const MessageBufferSize = 1024
 
 type InstacamMessageSource struct {
 	// "ws://1.2.3.4:80/ws"
@@ -71,16 +79,13 @@ var src MessageSource
 var headerMessage *Message
 
 // Map of clients by id to a channel of messages
-var clients map[int]chan Message
-
-// Sequence for assigning unique ids to clients
-var idSequence int = 0
-
-// Mutex for locking new clients
-var clientMutex sync.Mutex
+var clients map[*Client]chan *Message
 
 // Quit channel for the readMessages goroutine
 var quitReading chan bool
+
+var registerClient chan *Client
+var removeClient chan *Client
 
 // --------------------------
 
@@ -89,11 +94,11 @@ func FrameServer(conn *websocket.Conn) {
 	// Set the PayloadType to binary
 	conn.PayloadType = websocket.BinaryFrame
 
-	queue := make(chan Message, MessageBufferSize)
+	client := NewClient()
 
-	id := registerClient(queue)
+	registerClient <- client
 	defer func() {
-		removeClient(id)
+		removeClient <- client
 	}()
 
 	// Write the header as the first message to the client (MPEG size etc.)
@@ -102,47 +107,38 @@ func FrameServer(conn *websocket.Conn) {
 	}
 
 	// Read messages from the queue and write to the client
-	for msg := range queue {
-		if _, err := conn.Write(msg); err != nil {
+	for msg := range client.queue {
+		if _, err := conn.Write(*msg); err != nil {
 			return
 		}
 	}
 }
 
-func registerClient(queue chan Message) int {
-	clientMutex.Lock()
-	defer clientMutex.Unlock()
+func handleClients() {
+	for {
+		select {
+		case client := <-registerClient:
+			clients[client] = client.queue
 
-	// Assign a unique id to the client
-	idSequence++
-	id := idSequence
+			// If we added the first client, start reading of messages
+			if len(clients) == 1 {
+				go readMessages()
+			}
 
-	clients[id] = queue
+			if *verbose {
+				log.Printf("Client connected, %d clients total", len(clients))
+			}
+		case client := <-removeClient:
+			delete(clients, client)
 
-	// If we added the first client, start reading of messages
-	if len(clients) == 1 {
-		go readMessages()
-	}
+			if len(clients) == 0 {
+				quitReading <- true
+			}
 
-	if *verbose {
-		log.Printf("Client connected, %d clients total", len(clients))
-	}
-
-	return id
-}
-
-func removeClient(id int) {
-	clientMutex.Lock()
-	defer clientMutex.Unlock()
-
-	delete(clients, id)
-
-	if len(clients) == 0 {
-		quitReading <- true
-	}
-
-	if *verbose {
-		log.Printf("Client disconnected, %d clients total", len(clients))
+			if *verbose {
+				log.Printf("Client disconnected, %d clients total", len(clients))
+			}
+		}
 	}
 }
 
@@ -166,7 +162,7 @@ func readMessages() {
 			} else {
 				for _, queue := range clients {
 					select {
-					case queue <- msg:
+					case queue <- &msg:
 						// No op
 					default:
 						if *verbose {
@@ -217,8 +213,12 @@ func main() {
 		log.Fatalf("Error reading header message from source: %v", err)
 	}
 
-	clients = make(map[int]chan Message)
+	clients = make(map[*Client]chan *Message)
 	quitReading = make(chan bool)
+	registerClient = make(chan *Client)
+	removeClient = make(chan *Client)
+
+	go handleClients()
 
 	http.Handle("/ws", websocket.Handler(FrameServer))
 	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
