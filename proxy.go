@@ -7,6 +7,8 @@ import (
 
 	"flag"
 
+	"sync"
+
 	"go/build"
 	"os"
 
@@ -80,12 +82,13 @@ var headerMessage *Message
 
 // Map of clients by id to a channel of messages
 var clients map[*Client]chan *Message
+var clientsMu sync.RWMutex
 
 // Quit channel for the readMessages goroutine
 var quitReading chan bool
 
 var registerClient chan *Client
-var removeClient chan *Client
+var unregisterClient chan *Client
 
 // --------------------------
 
@@ -98,7 +101,7 @@ func FrameServer(conn *websocket.Conn) {
 
 	registerClient <- client
 	defer func() {
-		removeClient <- client
+		unregisterClient <- client
 	}()
 
 	// Write the header as the first message to the client (MPEG size etc.)
@@ -106,7 +109,7 @@ func FrameServer(conn *websocket.Conn) {
 		return
 	}
 
-	// Read messages from the queue and write to the client
+	// Continuously read messages from the queue and write to the client, stop on error
 	for msg := range client.queue {
 		if _, err := conn.Write(*msg); err != nil {
 			return
@@ -114,31 +117,48 @@ func FrameServer(conn *websocket.Conn) {
 	}
 }
 
-func handleClients() {
+func clientRegistration() {
+	clients = make(map[*Client]chan *Message)
+	quitReading = make(chan bool)
+	registerClient = make(chan *Client)
+	unregisterClient = make(chan *Client)
+
 	for {
 		select {
 		case client := <-registerClient:
-			clients[client] = client.queue
-
-			// If we added the first client, start reading of messages
-			if len(clients) == 1 {
-				go readMessages()
-			}
-
-			if *verbose {
-				log.Printf("Client connected, %d clients total", len(clients))
-			}
-		case client := <-removeClient:
-			delete(clients, client)
-
-			if len(clients) == 0 {
-				quitReading <- true
-			}
-
-			if *verbose {
-				log.Printf("Client disconnected, %d clients total", len(clients))
-			}
+			addClient(client)
+		case client := <-unregisterClient:
+			removeClient(client)
 		}
+	}
+}
+
+func addClient(client *Client) {
+	clientsMu.Lock()
+	clients[client] = client.queue
+	clientsMu.Unlock()
+
+	// If we added the first client, start reading of messages
+	if len(clients) == 1 {
+		go readMessages()
+	}
+
+	if *verbose {
+		log.Printf("Client connected, %d clients total", len(clients))
+	}
+}
+
+func removeClient(client *Client) {
+	clientsMu.Lock()
+	delete(clients, client)
+	clientsMu.Unlock()
+
+	if len(clients) == 0 {
+		quitReading <- true
+	}
+
+	if *verbose {
+		log.Printf("Client disconnected, %d clients total", len(clients))
 	}
 }
 
@@ -160,6 +180,7 @@ func readMessages() {
 					log.Printf("Error reading message from source: %v", err)
 				}
 			} else {
+				clientsMu.RLock()
 				for _, queue := range clients {
 					select {
 					case queue <- &msg:
@@ -170,6 +191,7 @@ func readMessages() {
 						}
 					}
 				}
+				clientsMu.RUnlock()
 			}
 		}
 	}
@@ -184,6 +206,9 @@ func readHeaderMessage() error {
 	return nil
 }
 
+// --------------------------
+
+// Find the package resource root to serve static files
 func getResourceRoot() string {
 	p, err := build.Default.Import(basePkg, "", build.FindOnly)
 	if err != nil {
@@ -213,12 +238,7 @@ func main() {
 		log.Fatalf("Error reading header message from source: %v", err)
 	}
 
-	clients = make(map[*Client]chan *Message)
-	quitReading = make(chan bool)
-	registerClient = make(chan *Client)
-	removeClient = make(chan *Client)
-
-	go handleClients()
+	go clientRegistration()
 
 	http.Handle("/ws", websocket.Handler(FrameServer))
 	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
