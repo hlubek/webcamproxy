@@ -6,10 +6,11 @@ import (
 	"net/http"
 
 	"flag"
-	"time"
 
 	"go/build"
 	"os"
+
+	"sync"
 
 	"code.google.com/p/go.net/websocket"
 )
@@ -61,53 +62,41 @@ func (s *InstacamMessageSource) ReadMessage() (Message, error) {
 
 // --------------------------
 
-type RandomMessageSource struct {
-}
-
-func (s *RandomMessageSource) Initialize() error {
-	return nil
-}
-
-func (s *RandomMessageSource) ReadMessage() (Message, error) {
-	msg := make([]byte, MaxInstacamFrameLength)
-	// TODO add some randomness
-
-	time.Sleep(100 * time.Millisecond)
-	return msg, nil
-}
-
-// --------------------------
-
 var webcamAddress = flag.String("webcam", "", "IP address of the webcam")
-var address = flag.String("adress", ":8080", "Address for the proxy to listen")
-
-var headerMessage *Message
-var clients map[int]chan Message
-var idSequence int = 0
+var address = flag.String("address", ":8080", "Address for the proxy to listen")
+var verbose = flag.Bool("verbose", false, "Output debug messages")
 
 var src MessageSource
+
+var headerMessage *Message
+
+// Map of clients by id to a channel of messages
+var clients map[int]chan Message
+
+// Sequence for assigning unique ids to clients
+var idSequence int = 0
+
+// Mutex for locking new clients
+var clientMutex sync.Mutex
+
+// Quit channel for the readMessages goroutine
+var quitReading chan bool
+
+// --------------------------
 
 // Write received messages from a channel to the websocket client
 func FrameServer(conn *websocket.Conn) {
 	// Set the PayloadType to binary
 	conn.PayloadType = websocket.BinaryFrame
 
-	// TODO Send first message as header to every new client
-	// struct { char magic[4] = "jsmp"; unsigned short width, height; };
-
 	queue := make(chan Message, MessageBufferSize)
 
-	// Assign a unique id to the client
-	idSequence++
-	id := idSequence
-
-	// TODO Guard this!
-	clients[id] = queue
-
+	id := registerClient(queue)
 	defer func() {
-		delete(clients, id)
+		removeClient(id)
 	}()
 
+	// Write the header as the first message to the client (MPEG size etc.)
 	if _, err := conn.Write(*headerMessage); err != nil {
 		return
 	}
@@ -120,25 +109,83 @@ func FrameServer(conn *websocket.Conn) {
 	}
 }
 
-func readMessages() {
-	for {
-		if msg, err := src.ReadMessage(); err != nil {
-			log.Printf("Error reading message from source: %v", err)
-		} else {
-			if headerMessage == nil {
-				headerMessage = &msg
-			}
+func registerClient(queue chan Message) int {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
 
-			for _, queue := range clients {
-				select {
-				case queue <- msg:
-					// No op
-				default:
-					log.Printf("Not send to client, blocked or closed?")
+	// Assign a unique id to the client
+	idSequence++
+	id := idSequence
+
+	clients[id] = queue
+
+	// If we added the first client, start reading of messages
+	if len(clients) == 1 {
+		go readMessages()
+	}
+
+	if *verbose {
+		log.Printf("Client connected, %d clients total", len(clients))
+	}
+
+	return id
+}
+
+func removeClient(id int) {
+	clientMutex.Lock()
+	defer clientMutex.Unlock()
+
+	delete(clients, id)
+
+	if len(clients) == 0 {
+		quitReading <- true
+	}
+
+	if *verbose {
+		log.Printf("Client disconnected, %d clients total", len(clients))
+	}
+}
+
+func readMessages() {
+	if *verbose {
+		log.Printf("Start reading messages")
+	}
+	for {
+		select {
+		case <-quitReading:
+			if *verbose {
+				log.Printf("Stop reading messages")
+			}
+			return
+		default:
+			if msg, err := src.ReadMessage(); err != nil {
+				// TODO Handle connection problems to webcam, eg. call Initialize again after some time
+				if *verbose {
+					log.Printf("Error reading message from source: %v", err)
+				}
+			} else {
+				for _, queue := range clients {
+					select {
+					case queue <- msg:
+						// No op
+					default:
+						if *verbose {
+							log.Printf("Message not sent to client, blocked or closed?")
+						}
+					}
 				}
 			}
 		}
 	}
+}
+
+func readHeaderMessage() error {
+	if msg, err := src.ReadMessage(); err != nil {
+		return err
+	} else {
+		headerMessage = &msg
+	}
+	return nil
 }
 
 func getResourceRoot() string {
@@ -157,16 +204,21 @@ func main() {
 		os.Exit(0)
 	}
 
-	src = &InstacamMessageSource{Url: "ws://" + *webcamAddress + ":80/ws"}
-
-	err := src.Initialize()
-	if err != nil {
-		log.Fatal(err)
+	websocketUrl := "ws://" + *webcamAddress + ":80/ws"
+	src = &InstacamMessageSource{Url: websocketUrl}
+	if err := src.Initialize(); err != nil {
+		log.Fatalf("Error initializing source: %v", err)
+	} else {
+		if *verbose {
+			log.Printf("Connected to source %s", websocketUrl)
+		}
+	}
+	if err := readHeaderMessage(); err != nil {
+		log.Fatalf("Error reading header message from source: %v", err)
 	}
 
 	clients = make(map[int]chan Message)
-
-	go readMessages()
+	quitReading = make(chan bool)
 
 	http.Handle("/ws", websocket.Handler(FrameServer))
 	http.Handle("/", http.FileServer(http.Dir(getResourceRoot()+"/resources/")))
