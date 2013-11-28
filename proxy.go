@@ -8,6 +8,7 @@ import (
 	"flag"
 
 	"sync"
+	"time"
 
 	"go/build"
 	"os"
@@ -178,7 +179,9 @@ func readMessages() {
 				// TODO Handle connection problems to webcam, eg. call Initialize again after some time
 				if *verbose {
 					log.Printf("Error reading message from source: %v", err)
+					log.Printf("Reconnecting...")
 				}
+				reconnectSource()
 			} else {
 				clientsMu.RLock()
 				for _, queue := range clients {
@@ -204,6 +207,22 @@ func readHeaderMessage() error {
 		headerMessage = &msg
 	}
 	return nil
+}
+
+func reconnectSource() {
+	for {
+		if err := src.Initialize(); err != nil {
+			if *verbose {
+				log.Printf("Error connecting to source: %v", err)
+			}
+		} else {
+			if *verbose {
+				log.Printf("Re-connected to source")
+			}
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
 }
 
 // --------------------------
