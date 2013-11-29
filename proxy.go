@@ -59,6 +59,7 @@ func (s *InstacamMessageSource) Initialize() error {
 
 func (s *InstacamMessageSource) ReadMessage() (Message, error) {
 	msg := make([]byte, MaxInstacamFrameLength)
+	s.camConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	if n, err := s.camConn.Read(msg); err != nil {
 		return nil, err
 	} else {
@@ -176,7 +177,6 @@ func readMessages() {
 			return
 		default:
 			if msg, err := src.ReadMessage(); err != nil {
-				// TODO Handle connection problems to webcam, eg. call Initialize again after some time
 				if *verbose {
 					log.Printf("Error reading message from source: %v", err)
 					log.Printf("Reconnecting...")
