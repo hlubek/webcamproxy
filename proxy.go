@@ -41,6 +41,8 @@ func NewClient() *Client {
 // --------------------------
 
 const MaxInstacamFrameLength = 20000
+const ClientWriteTimeout = 3
+const SourceReadTimeout = 1
 
 type InstacamMessageSource struct {
 	// "ws://1.2.3.4:80/ws"
@@ -59,7 +61,7 @@ func (s *InstacamMessageSource) Initialize() error {
 
 func (s *InstacamMessageSource) ReadMessage() (Message, error) {
 	msg := make([]byte, MaxInstacamFrameLength)
-	s.camConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	s.camConn.SetReadDeadline(time.Now().Add(SourceReadTimeout * time.Second))
 	if n, err := s.camConn.Read(msg); err != nil {
 		return nil, err
 	} else {
@@ -107,12 +109,14 @@ func FrameServer(conn *websocket.Conn) {
 	}()
 
 	// Write the header as the first message to the client (MPEG size etc.)
+	conn.SetWriteDeadline(time.Now().Add(ClientWriteTimeout * time.Second))
 	if _, err := conn.Write(*headerMessage); err != nil {
 		return
 	}
 
 	// Continuously read messages from the queue and write to the client, stop on error
 	for msg := range client.queue {
+		conn.SetWriteDeadline(time.Now().Add(ClientWriteTimeout * time.Second))
 		if _, err := conn.Write(*msg); err != nil {
 			return
 		}
